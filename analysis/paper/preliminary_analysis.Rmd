@@ -1,0 +1,572 @@
+---
+title: "Preliminary analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      cache = TRUE)
+library(mesoda)
+library(metR)
+library(tidyverse)
+library(lubridate)
+library(data.table)
+library(here)
+library(patchwork)
+library(unglue)
+library(knitr)
+library(kableExtra)
+library(tagger)
+library(cowplot)
+
+map_arg <- rnaturalearth::ne_states(country = c("argentina"), 
+                                    returnclass = "sf")
+map_limitrofes <- rnaturalearth::ne_countries(country = c("Brazil", "Chile", "Uruguay", "Paraguay", "Bolivia"), returnclass = "sf")
+
+# square <- fread(here("analysis/data/derived_data/sample_obs/dominio_square.csv"))
+square2 <- fread("~/datosmunin3/EXP/paper_ana_20181122-derived_data/sample_obs/dominio_square2.csv")
+# coord <- fread(here("analysis/data/derived_data/sample_obs/coordenadas.csv"))
+
+
+geom_mapa <- function(fill = NA) {
+  list(geom_sf(data = map_arg, fill = fill, color = "black", size = 0.1, inherit.aes = FALSE),
+       geom_sf(data = map_limitrofes, fill = fill, color = "black", size = 0.1, inherit.aes = FALSE),
+       coord_sf(ylim = c(-42, -19), xlim = c(-76, -51)),
+       scale_x_longitude(ticks = 5),
+       scale_y_latitude(ticks = 5))
+}
+
+lon_band = c(-67, -54.5)
+lat_band = c(-38.5, -21)
+
+# arg_topo <- metR::GetTopography(-75+360, -50+360, -20, -60, resolution = 1/10, 
+#                                 file.dir = here("analysis/data/derived_data/"))
+# arg_topo[, lon := metR::ConvertLongitude(lon)]
+# 
+# cordillera <- list(
+#   ggnewscale::new_scale_fill(),
+#   geom_contour_fill(data = arg_topo, aes(x = lon, y = lat,
+#                                          z = h),
+#                     breaks = seq(1500, 8000, by = 700)),
+#   scale_fill_gPOLient(low = "#E2E6E6", high = "#7E7E7E", guide = "none",
+#                       oob = scales::squish))
+
+scale_date <- function(ini = 20181120180000, end = 20181123120000,
+                       break_bin = "6 hour") {
+  scale_x_datetime(breaks = seq.POSIXt(ymd_hms(ini), ymd_hms(end), by = break_bin),
+                   labels = function(x) {
+                     fifelse(hour(x) == 0, format(x, "%H UTC\n%b %d"), format(x, "%H"))
+                   }) 
+}
+
+colores_exp <- c(E6_long = "#EE7733", E9_long = "#CC3311", EG3_long = "#047994")
+```
+
+## Analysis
+
+(ref:TQ-diff-abi) Difference between the ensemble mean of analyses a) and c) POL-CTRL, b) and d) ABI-CTRL for the spatially averaged vertical profiles of temperature (a and b in $K$) and specific humidity (c and d in $gkg^{-1}$) calculated over the interior domain (red box in Figure \@ref(fig:domain)a) for each analysis cycle. 
+
+```{r TQ-diff-abi, fig.cap="(ref:TQ-diff-abi)", fig.height=8, fig.width=7, fig.align="left"}
+files <- Sys.glob(here("analysis/data/derived_data_long/ana/perfiles_ana_*"))
+
+perfiles <- purrr::map(files, function(f) {
+  meta <- unglue(basename(f), "perfiles_{run}_era5_{exp}_long.csv")
+  fread(f) %>% 
+    .[, exp := meta[[1]][["exp"]]]
+  
+}) %>% 
+  rbindlist() %>% 
+  .[exp %in% c("E6", "E9", "EG3")] %>% 
+  .[, date := as_datetime(date)] 
+
+
+perfiles %>% 
+  .[variable == "T"] %>% 
+  dcast(lev + date ~ exp, value.var = "ana") %>% 
+  .[, ":="(E9_E6 = E9 - E6,
+           EG3_E6 = EG3 - E6)] %>% 
+  melt(measure.vars = c("E9_E6", "EG3_E6")) %>% 
+  ggplot(aes(date, lev)) +
+  geom_contour_fill(aes(z = value, fill = stat(level)),
+                    breaks = c(seq(-2.5, 2, 0.2))) +
+  geom_contour2(aes(z = value), color = "white", size = 0.05,
+                breaks = c(seq(-2.5, 2, 0.2), Inf)) +
+  scale_fill_divergent_discretised(guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3,
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black"), 
+                                   labels = function(x) JumpBy(x, by = 2, fill = "")) +
+  labs(fill = "Temperature (K)",
+       x = NULL,
+       y = "Presión (hPa)") +
+  scale_y_level(name = "Pressure (hPa)", breaks = c(1000, 900, 750, 500, 300, 200, 100)) +
+  scale_x_datetime(date_breaks = "1 day", date_labels = "%d", expand = c(0, 0)) +
+  facet_wrap(~variable, ncol = 1,
+             labeller = labeller(variable = c("E9_E6" = "POL - CTRL",
+                                              "EG3_E6" = "ABI - CTRL"))) +
+  tag_facets(position = list(x = 0.01, y = 0.96)) +
+  theme_minimal(base_size = 8) +
+  theme(legend.position = "bottom",
+        tagger.panel.tag.text = element_text(size = 8),
+        panel.ontop = TRUE,
+        panel.grid = element_line(linetype = 3)) +
+  
+  
+  perfiles %>% 
+  .[variable == "QVAPOR"] %>% 
+  dcast(lev + date ~ exp, value.var = "ana") %>% 
+  .[, ":="(E9_E6 = E9 - E6,
+           EG3_E6 = EG3 - E6)] %>% 
+  melt(measure.vars = c("E9_E6", "EG3_E6")) %>% 
+  ggplot(aes(date, lev)) +
+  geom_contour_fill(aes(z = value*1000, fill = stat(level)), 
+                    breaks = c(seq(-1.7, 1.4, 0.2), Inf)) +
+  geom_contour2(aes(z = value), color = "white", size = 0.05,
+                breaks = c(seq(-1.7, 1.4, 0.2))) +
+  scale_fill_divergent_discretised(guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3, 
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black"),
+                                   labels = function(x) JumpBy(x, by = 2, fill = "")) +
+  
+  scale_y_level(name = "Presión (hPa)", breaks = c(1000, 900, 750, 500, 300, 200, 100)) +
+  # scale_date(ini = 20181108000000, break_bin = "24 hours") +
+  scale_x_datetime(date_breaks = "1 day", date_labels = "%d", expand = c(0, 0)) +
+  labs(fill = latex2exp::TeX("Specific \nhumidity ($g$ $Kg^{-1}$)"),
+       y = "Pressure (hPa)",
+       x = NULL) +
+  facet_wrap(~variable, ncol = 1,
+             labeller = labeller(variable = c("E9_E6" = "POL - CTRL",
+                                              "E10_E6" = "POL+ABI - CTRL",
+                                              "EG3_E6" = "ABI - CTRL"))) +
+  tag_facets(tag_pool = c("c", "d"), position = list(x = 0.01, y = 0.96)) +
+  theme_minimal(base_size = 8) +
+  theme(legend.position = "bottom",
+        tagger.panel.tag.text = element_text(size = 8),
+        panel.ontop = TRUE,
+        panel.grid = element_line(linetype = 3)) +
+  
+  plot_layout(ncol = 1, heights = c(1, 1))
+
+```
+
+(ref:UV-diff-abi) Difference between the ensemble mean of (a) and (c) POL-CTRL, and (b) and (d) ABI-CTRL analyses for the spatially averaged vertical profiles of the zonal wind (a and b, in $ms^{-1}$) and meridional wind (c and d, in $ms^{-1}$) computed over the interior domain (red box in Figure \@ref(fig:domain)a) for each analysis cycle. The black contours correspond to the zonal and meridional wind for (a, c) POL and (b, d) ABI.
+
+```{r UV-diff-abi, fig.cap="(ref:UV-diff-abi)", fig.height=8, fig.width=7, fig.align="left"}
+perfiles %>% 
+  .[variable == "U"] %>% 
+  dcast(lev + date ~ exp, value.var = "ana") %>% 
+  .[, ":="(E9_E6 = E9 - E6,
+           EG3_E6 = EG3 - E6)] %>% 
+  melt(measure.vars = c("E9_E6", "EG3_E6")) %>% 
+  ggplot(aes(date, lev)) +
+  # geom_contour(aes(z = value)) +
+  geom_contour_fill(aes(z = value, fill = stat(level)), breaks = seq(-3.5, 2.5, 0.2)) +
+  scale_fill_divergent_discretised(guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3, 
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black"),
+                                   labels = function(x) JumpBy(x, by = 2, fill = "")) +
+  geom_contour2(aes(z = value), color = "white", size = 0.05,
+                breaks = seq(-3.5, 2.5, 0.2)) +
+  geom_contour2(data = ~.x[, .(lev, date, E9_E6 = E9, EG3_E6 = EG3)] %>%
+                  melt(id.vars = c("lev", "date")) %>% unique(), aes(z = value),
+                breaks = seq(0, 50, 5), size = 0.1, linetype = 1, color = "grey30") +
+  geom_text_contour(data = ~.x[, .(lev, date, E9_E6 = E9, EG3_E6 = EG3)] %>%
+                      melt(id.vars = c("lev", "date")) %>% unique(), aes(z = value),
+                    breaks = seq(0, 50, 5), color = "grey30", skip = 1,
+                    size = 2, stroke = 0.1) +
+  labs(fill = latex2exp::TeX("U ($m$ $s^{-1}$)"),
+       x = NULL,
+       y = NULL) +
+  scale_y_level(name = "Pressure (hPa)", breaks = c(1000, 900, 750, 500, 300, 200, 100)) +
+  scale_x_datetime(date_breaks = "1 day", date_labels = "%d", expand = c(0, 0)) +
+  facet_wrap(~variable, ncol = 1,
+             labeller = labeller(variable = c("E9_E6"  = "**POL** - CTRL",
+                                              "EG3_E6" = "**ABI** - CTRL"))) +
+  tag_facets(position = list(x = 0.01, y = 0.96)) +
+  theme_minimal(base_size = 8) +
+  theme(legend.position = "bottom",
+        tagger.panel.tag.text = element_text(size = 8),
+        panel.ontop = TRUE,
+        panel.grid = element_line(linetype = 3), 
+        strip.text = ggtext::element_markdown()) +
+  
+  
+  perfiles %>% 
+  .[variable == "V"] %>% 
+  dcast(lev + date ~ exp, value.var = "ana") %>% 
+  .[, ":="(E9_E6 = E9 - E6,
+           EG3_E6 = EG3 - E6)] %>% 
+  melt(measure.vars = c("E9_E6", "EG3_E6")) %>% 
+  ggplot(aes(date, lev)) +
+  geom_contour_fill(aes(z = value, fill = stat(level)),
+                    breaks = c(seq(-4, 2, 0.2), Inf)) +
+  geom_contour2(aes(z = value), color = "white", size = 0.05,
+                breaks = c(-Inf, seq(-4, 2, 0.2), Inf)) +
+  scale_fill_divergent_discretised(guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3, 
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black"),
+                                   labels = function(x) JumpBy(x, 2, fill = "")) +
+  geom_contour2(data = ~.x[, .(lev, date, E9_E6 = E9, EG3_E6 = EG3)] %>%
+                  melt(id.vars = c("lev", "date")) %>% unique(),
+                aes(z = value, linetype = factor(-sign(..level..))),
+                breaks = seq(-30, 10, 2), size = 0.1, color = "grey30") +
+  geom_text_contour(data = ~.x[, .(lev, date, E9_E6 = E9, EG3_E6 = EG3)] %>%
+                      melt(id.vars = c("lev", "date")) %>% unique(), aes(z = value),
+                    breaks = seq(-30, 10, 2), color = "grey30", skip = 1,
+                    size = 2, stroke = 0.1) +
+  labs(fill = latex2exp::TeX("V ($m$ $s^{-1}$)"),
+       x = NULL,
+       y = NULL) +
+  scale_linetype(guide = NULL) +
+  scale_y_level(name = "Pressure (hPa)", breaks = c(1000, 900, 750, 500, 300, 200, 100)) +
+  scale_x_datetime(date_breaks = "1 day", date_labels = "%d", expand = c(0, 0)) +
+  facet_wrap(~variable, ncol = 1,
+             labeller = labeller(variable = c("E9_E6"  = "**POL** - CTRL",
+                                              "E10_E6" = "**POL+ABI** - CTRL",
+                                              "EG3_E6" = "**ABI** - CTRL"))) +
+  tag_facets(tag_pool = c("c", "d"), position = list(x = 0.01, y = 0.96)) +
+  theme_minimal(base_size = 8) +
+  theme(legend.position = "bottom",
+        tagger.panel.tag.text = element_text(size = 8),
+        panel.ontop = TRUE,
+        panel.grid = element_line(linetype = 3),
+        strip.text = ggtext::element_markdown()) +
+  plot_layout(ncol = 1, heights = c(1, 1))
+
+
+```
+
+(ref:era5-abi) Difference between the ensemble mean of each experiment's analysis and ERA5 for the spatially averaged vertical profiles of air temperature (K, a--d), specific humidity ($g kg^{-1}$, e--h) and meridional wind ($m s^{-1}$, i--l) calculated over the inner domain (red box in Figure \@ref(fig:domain)a) for each analysis cycle.
+
+```{r era5-abi, fig.cap="(ref:era5-abi)", fig.width=6, fig.height=8, fig.align="left"}
+# era <- fread(here("data/derived_data/reanalysis/perfiles_ana_era5.csv"))
+
+perfiles %>% 
+  .[variable == "T"] %>% 
+  ggplot(aes(date, lev)) +
+  geom_contour_fill(aes(z = ana  - era, fill = stat(level)), 
+                    breaks = c(-Inf, seq(-3, 3, 0.5))) +
+  geom_contour2(aes(z = ana - era), color = "white", size = 0.05,
+                breaks = seq(-3, 3, 0.5)) +
+  scale_fill_divergent_discretised(guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3,
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black")) +
+  scale_y_level(name = "Pressure (hPa)", breaks = c(1000, 850, 750, 500, 300, 200, 100)) +
+  scale_x_datetime(date_breaks = "2 day", date_labels = "%d", expand = c(0, 0)) +
+  facet_wrap(vars(exp), ncol = 3, labeller = labeller(exp = c(E6 = "CTRL", E9 = "POL", 
+                                                              E10 = "POL+ABI", EG3 = "ABI"))) +
+  labs(fill = "Temperature (K)",
+       x = NULL,
+       y = "Pressure (hPa)") +
+  tag_facets(position = list(x = 0.03, y = 0.97)) +
+  theme_minimal(base_size = 8) +
+  theme(legend.position = "bottom",
+        tagger.panel.tag.text = element_text(size = 8),
+        plot.margin = margin(0, 0, 0, 0, "cm"),
+        panel.ontop = TRUE,
+        panel.grid = element_line(linetype = 3)) +
+  
+  perfiles %>% 
+  .[variable == "QVAPOR"] %>% 
+  ggplot(aes(date, lev)) +
+  geom_contour_fill(aes(z = ana  - era, fill = stat(level)),  
+                    breaks = c(-Inf, seq(-0.0035, 0.0015, 0.0005), Inf)) +
+  geom_contour2(aes(z = ana  - era), color = "white", size = 0.05,
+                breaks = seq(-0.0035, 0.0015, 0.0005)) +
+  scale_fill_divergent_discretised(guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3,
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black")) +
+  scale_y_level(name = "Pressure (hPa)", breaks = c(1000, 850, 750, 500, 300, 200, 100)) +
+  scale_x_datetime(date_breaks = "2 day", date_labels = "%d", expand = c(0, 0)) +
+  facet_wrap(vars(exp), ncol = 3, labeller = labeller(exp = c(E6 = "CTRL", E9 = "POL", 
+                                                              E10 = "POL+ABI", EG3 = "ABI"))) +
+  labs(fill = latex2exp::TeX("Specific \nhumidity ($g$ $Kg^{-1}$)"),
+       x = NULL,
+       y = "Pressure (hPa)") +
+  tag_facets(position = list(x = 0.03, y = 0.97), tag_pool = c("d", "e", "f")) +
+  theme_minimal(base_size = 8) +
+  theme(legend.position = "bottom",
+        tagger.panel.tag.text = element_text(size = 8),
+        plot.margin = margin(0, 0, 0, 0, "cm"),
+        panel.ontop = TRUE,
+        panel.grid = element_line(linetype = 3)) +
+  
+  perfiles %>% 
+  .[variable == "U"] %>% 
+  ggplot(aes(date, lev)) +
+  geom_contour_fill(aes(z = ana  - era, fill = stat(level)), 
+                    breaks = seq(-7, 6, 0.5)) +
+  geom_contour2(aes(z = ana - era), color = "white", size = 0.05,
+                breaks = seq(-7, 6, 0.5)) +
+  scale_fill_divergent_discretised(guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3,
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black")) +
+  scale_y_level(name = "PrePressuresión (hPa)", breaks = c(1000, 850, 750, 500, 300, 200, 100)) +
+  scale_x_datetime(date_breaks = "2 day", date_labels = "%d", expand = c(0, 0)) +
+  facet_wrap(vars(exp), ncol = 4, labeller = labeller(exp = c(E6 = "CTRL", E9 = "POL", 
+                                                              E10 = "POL+ABI", EG3 = "ABI"))) +
+  labs(fill = latex2exp::TeX("U ($m$ $s^{-1}$)"),
+       x = NULL,
+       y = "Pressure (hPa)") +
+  tag_facets(position = list(x = 0.03, y = 0.97), tag_pool = c("g", "h", "i")) +
+  theme_minimal(base_size = 8) +
+  theme(legend.position = "bottom",
+        tagger.panel.tag.text = element_text(size = 8),
+        plot.margin = margin(0, 0, 0, 0, "cm"),
+        panel.ontop = TRUE,
+        panel.grid = element_line(linetype = 3)) +
+  
+  perfiles %>% 
+  .[variable == "V"] %>% 
+  ggplot(aes(date, lev)) +
+  geom_contour_fill(aes(z = ana  - era, fill = stat(level)), 
+                    breaks = seq(-7, 7, 0.5)) +
+  geom_contour2(aes(z = ana - era), color = "white", size = 0.05,
+                breaks = seq(-7, 7, 0.5)) +
+  scale_fill_divergent_discretised(guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3,
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black")) +
+  scale_y_level(name = "Pressure (hPa)", breaks = c(1000, 850, 750, 500, 300, 200, 100)) +
+  scale_x_datetime(date_breaks = "2 day", date_labels = "%d", expand = c(0, 0)) +
+  facet_wrap(vars(exp), ncol = 3, labeller = labeller(exp = c(E6 = "CTRL", E9 = "POL", 
+                                                              E10 = "POL+ABI", EG3 = "ABI"))) +
+  labs(fill = latex2exp::TeX("V ($m$ $s^{-1}$)"),
+       x = NULL,
+       y = "Pressure (hPa)") +
+  tag_facets(position = list(x = 0.03, y = 0.97), tag_pool = c("j", "k", "l")) +
+  theme_minimal(base_size = 8) +
+  theme(legend.position = "bottom",
+        tagger.panel.tag.text = element_text(size = 8),
+        plot.margin = margin(0, 0, 0, 0, "cm"),
+        panel.ontop = TRUE,
+        panel.grid = element_line(linetype = 3)) +
+  
+  plot_layout(ncol = 1, heights = c(1, 1, 1, 1)) 
+```
+
+
+(ref:sondeos-iop) RMSE (solid line) and BIAS (dashed line) of dew point temperature ($K$), temperature ($K$), zonal wind ($m s^{-1}$) and meridional wind ($m s^{-1}$) calculated by comparing the analysis of each experiment with RELAMPAGO radiosondes during the IOPs include in the experiment period. The orange line corresponds to CTRL, the red line to POL and ABI is represented by a turquoise line.
+
+```{r sondeos-iop, fig.width=7, fig.height=8, fig.cap="(ref:sondeos-iop)"}
+sondeos <- rbind(fread(here("analysis/data/derived_data_long/ana/sondeos_EG3_long.csv")),
+                 fread(here("analysis/data/derived_data_long/ana/sondeos_E9_long.csv")) %>% 
+                   .[, exp := "E9_long"],
+                 fread(here("analysis/data/derived_data_long/ana/sondeos_E6_long.csv")))
+
+sondeos %>% 
+  ggplot(aes(lev/1000, value.est)) +
+  geom_hline(yintercept = 0, color = "grey30") +
+  geom_line(aes(color = exp, linetype = estadistico)) +
+  scale_color_manual(values = c(colores_exp), labels = c(E9_long = "POL", EG3_long = "ABI", E6_long = "CTRL")) +
+  coord_flip() +
+  facet_grid(iop ~ variable_labels, scales = "free_x", 
+             labeller = label_parsed) +
+  tagger::tag_facets(position = list(x = 0.05, y = 0.95)) +
+  labs(y = "Bias/RMSE", x = "Height (Km)", color = NULL, linetype = NULL) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+(ref:sondeos-all) RMSE (solid line) and BIAS (dashed line) of dew point temperature ($K$), temperature ($K$), zonal wind ($m s^{-1}$) and meridional wind ($m s^{-1}$) calculated by comparing the analysis of each experiment with RELAMPAGO radiosondes during the experiment period. The orange line corresponds to CTRL, the red line to POL and ABI is represented by a turquoise line.
+
+```{r sondeos-all, fig.width=7, fig.height=8, fig.cap="(ref:sondeos-iop)"}
+sondeos_all <- rbind(fread(here("analysis/data/derived_data_long/ana/sondeos_EG3_long_all.csv")),
+                 fread(here("analysis/data/derived_data_long/ana/sondeos_E9_long_all.csv")) %>% 
+                   .[, exp := "E9_long"],
+                 fread(here("analysis/data/derived_data_long/ana/sondeos_E6_long_all.csv")))
+
+sondeos_all %>% 
+  ggplot(aes(lev/1000, value.est)) +
+  geom_hline(yintercept = 0, color = "grey30") +
+  geom_line(aes(color = exp, linetype = estadistico)) +
+  scale_color_manual(values = c(colores_exp), labels = c(E9_long = "POL", EG3_long = "ABI", E6_long = "CTRL")) +
+  coord_flip() +
+  facet_grid(. ~ variable_labels, scales = "free_x", 
+             labeller = label_parsed) +
+  tagger::tag_facets(position = list(x = 0.05, y = 0.95)) +
+  labs(y = "Bias/RMSE", x = "Height (Km)", color = NULL, linetype = NULL) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+
+### Impacto en la precipitación
+
+(ref:area-abi) Percentage of area covered by 1-hour precipitation greater than a) 1 $mmh^{-1}$, b) 5 $mmh^{-1}$, c) 10 $mmh^{-1}$, and d) 25 $mmh^{-1}$ over time for the preliminary field of CTRL (orange line), POL (red line), and ABI (turquoise line) experiments between 00 UTC 8 November and 12 UTC 23 November. In shading and for each experiment the maximum and minimum area estimated by the ensemble is shown. In black dashed line the IMERG estimate is shown.
+
+```{r area-abi, fig.cap="(ref:area-abi)", fig.width=7, fig.height=5}
+imerg <- read_rds(here("analysis/data/derived_data_long/observations/IMERG_1h_long.rds"))
+
+q <- c(1, 5, 10, 25, 50)
+lon_band = c(-67, -54.5)
+lat_band = c(-38.5, -21)
+# lon_band = c(-66.5, -61.5)
+# lat_band = c(-35.5, -29)
+imerg <- purrr::map(q, function(f){
+  
+  imerg %>%
+    .[, c("lon", "lat") := wrf_project(x, y, inverse = TRUE, round = FALSE)] %>% 
+    .[lon %between% lon_band & lat %between% lat_band] %>%
+    .[, .(area = sum(pp_acum > f)/.N), by = .(end_date)] %>%
+    .[, umbral := f] %>%
+    .[]
+}) %>%
+  rbindlist()
+
+
+files <- Sys.glob(here("analysis/data/derived_data_long/ana/area/E*_ana*_area_acum_*.rds"))
+
+pp_area <- purrr::map(files, readRDS) %>% rbindlist()
+pp_area %>% 
+  # .[, exp := str_remove(exp, "_long")] %>% 
+  .[umbral %in% c(1, 5, 10, 25)] %>% 
+  .[, .(mean_area = mean(area),
+        max_area = max(area),
+        min_area = min(area)), by = .(umbral, date, exp)] %>% 
+  ggplot(aes(date, mean_area)) +
+  geom_line(data = imerg[umbral %in% c(1, 5, 10, 25)], 
+            aes(end_date, area, color = "OBS"),
+            linetype = 2) +
+  geom_ribbon(aes(ymin = min_area, ymax = max_area, fill = exp), alpha = .1) +
+  geom_line(aes(color = exp)) +
+  scale_color_manual(values = c(OBS = "grey20", colores_exp),
+                     labels = c(E6_long = "CTRL", E9_long = "POL",
+                                EG3_long = "ABI", OBS = "OBS")) +
+  scale_fill_manual(values = c(OBS = "grey20", colores_exp),
+                    guide = NULL,
+                    labels = c(E6_long = "CTRL", E9_long = "POL",
+                               EG3_long = "ABI", OBS = "OBS")) +
+  scale_y_continuous(label = scales::percent_format()) +
+  scale_x_datetime(date_labels = "%d", date_breaks = "1 day", expand = c(0, 0)) +
+  facet_wrap(~umbral, scales = "free_y", ncol = 1,
+             labeller = labeller(umbral = c("1" = "1 mm", "5" = "5 mm", 
+                                            "10" = "10 mm", "25" = "25 mm"))) +
+  tagger::tag_facets() +
+  labs(y = "Área cubierta por precipitación (%)", x = NULL, 
+       fill = NULL, color = NULL, linetype = NULL) +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "bottom",
+        panel.background = element_rect(fill = "#fbfbfb", color = NA))
+
+```
+
+
+(ref:fss-abi) FSS calculated over 1-hour accumulated precipitation for 1 mm (a and c) and 25 mm (b and d) thresholds, at 10 km (a and b) and 100 km (c and d) scales, for the first-guess of CTRL (orange line), POL (red line), and ABI (turquoise line) experiments between 00 UTC 8 November and 12 UTC 23 November.
+
+```{r fss-abi, fig.cap="(ref:fss-abi)", fig.width=6, fig.height=5}
+files <- Sys.glob(here("analysis/data/derived_data_long/ana/fss_1h_ana*"))
+
+fss <- purrr::map(files, function(f) {
+  
+  meta <- unglue(basename(f), "fss_1h_ana_*_{exp}.csv")
+  
+  fread(f) %>% 
+    .[, date := as_datetime(date)] 
+}) %>% 
+  rbindlist()
+
+fss %>% 
+  .[q %in% c(1, 25) & window %in% c(1, 11)] %>% 
+  .[, ":="(q_label = factor(q, labels = c("1~mm~h^{-1}", "25~mm~h^{-1}")),
+           w_label = factor(window, labels = c("10~km", "100~km")))] %>% 
+  ggplot(aes(date, fss)) +
+  geom_hline(yintercept = 1, color = "darkgray") +
+  geom_line(aes(color = exp)) +
+  scale_color_manual(values = colores_exp, 
+                     labels = c(E6_long = "CTRL", E9_long = "POL",
+                                EG3_long = "ABI")) +
+  scale_x_datetime(date_labels = "%d", date_breaks = "1 day", expand = c(0, 0)) +
+  facet_grid(w_label ~ q_label, labeller = label_parsed) +
+  tagger::tag_facets(position = list(x = 0.05, y = 0.90)) +
+  labs(color = NULL, x = NULL, y = "FSS", linetype = NULL) +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "bottom",
+        panel.background = element_rect(fill = "#fbfbfb", color = NA))
+```
+
+(ref:fss-abi-all) FSS calculated over 1-hour accumulated precipitation for 1,5, 10, 25 and 50 mm thresholds as function of the radious of influence ($km$), for the first-guess of CTRL (orange line), POL (red line), and ABI (turquoise line) experiments between 00 UTC 8 November and 12 UTC 23 November.
+
+```{r fss-abi-all, fig.cap="(ref:fss-abi-all)", fig.width=6, fig.height=3}
+fss[, .(fss = 1 - sum(top)/sum(bottom)), by =.(window, q, exp)] %>% 
+  # .[q %in% c(1, 5, 10)] %>% 
+  .[, ":="(q_label = factor(q, labels = c("1~mmh^{-1}", "5~mmh^{-1}", "10~mmh^{-1}", "25~mmh^{-1}", "50~mmh^{-1}")))] %>%
+  ggplot(aes(window*10, fss)) +
+  geom_line(aes(color = exp)) +
+  scale_color_manual(values = c(colores_exp), labels = c(E9_long = "POL", EG3_long = "ABI", E6_long = "CTRL")) +
+  facet_wrap(vars(q_label), scales = "free_y", labeller = label_parsed) +
+  tagger::tag_facets(position = list(x = 0.05, y = 0.90)) +
+  labs(color = NULL, linetype = NULL, x = "Radius of Influence (km)", y = "FSS") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        legend.box = "vertical", 
+        legend.margin = margin())
+```
+
+## Deterministic forecast
+
+```{r fss-abi-fcst, fig.cap="(ref:fss-abi)", fig.width=6, fig.height=5}
+files <- Sys.glob(here("analysis/data/derived_data_long/fcst_det/fss/fss_1h_*"))
+
+fss <- purrr::map(files, function(f) {
+  
+  meta <- unglue(basename(f), "fss_1h_fcst_det_{ini_date}_{exp}_d02.csv")
+  
+  fread(f) %>% 
+    .[, date := as_datetime(date)] %>% 
+    .[, ini_date := ymd_h(meta[[1]][["ini_date"]])]
+}) %>% 
+  rbindlist()
+
+fss %>% 
+  .[, lead_time := as.numeric(date - ini_date)/3600] %>% 
+  .[, .(fss = 1 - sum(top)/sum(bottom)), by =.(window, q, exp, lead_time)] %>% 
+  
+  .[q %in% c(1, 5, 25) & window %in% c(1, 11)] %>% 
+  .[, ":="(q_label = factor(q, labels = c("1~mm~h^{-1}", "5~mm~h^{-1}", "25~mm~h^{-1}")),
+           w_label = factor(window, labels = c("10~km", "100~km")))] %>% 
+  ggplot(aes(lead_time, fss)) +
+  # geom_hline(yintercept = 1, color = "darkgray") +
+  geom_line(aes(color = exp)) +
+  scale_color_manual(values = colores_exp, 
+                     labels = c(E6_long = "CTRL", E9_long = "POL",
+                                EG3_long = "ABI")) +
+  # scale_x_datetime(date_labels = "%d", date_breaks = "1 day", expand = c(0, 0)) +
+  facet_grid(w_label ~ q_label, labeller = label_parsed) +
+  tagger::tag_facets(position = list(x = 0.05, y = 0.90)) +
+  labs(color = NULL, x = NULL, y = "FSS", linetype = NULL) +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "bottom",
+        panel.background = element_rect(fill = "#fbfbfb", color = NA))
+```
+
+
+```{r}
+fss[, .(fss = 1 - sum(top)/sum(bottom)), by =.(window, q, exp)] %>% 
+  # .[q %in% c(1, 5, 10)] %>% 
+  .[, ":="(q_label = factor(q, labels = c("1~mmh^{-1}", "5~mmh^{-1}", "10~mmh^{-1}", "25~mmh^{-1}", "50~mmh^{-1}")))] %>%
+  ggplot(aes(window*10, fss)) +
+  geom_line(aes(color = exp)) +
+  scale_color_manual(values = c(colores_exp), labels = c(E9_long = "POL", EG3_long = "ABI", E6_long = "CTRL")) +
+  facet_wrap(vars(q_label), scales = "free_y", labeller = label_parsed) +
+  labs(color = NULL, linetype = NULL, x = "Radius of Influence (km)", y = "FSS") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        legend.box = "vertical", 
+        legend.margin = margin())
+```
+
