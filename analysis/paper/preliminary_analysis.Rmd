@@ -386,9 +386,9 @@ sondeos %>%
 
 ```{r sondeos-all, fig.width=7, fig.height=8, fig.cap="(ref:sondeos-iop)"}
 sondeos_all <- rbind(fread(here("analysis/data/derived_data_long/ana/sondeos_EG3_long_all.csv")),
-                 fread(here("analysis/data/derived_data_long/ana/sondeos_E9_long_all.csv")) %>% 
-                   .[, exp := "E9_long"],
-                 fread(here("analysis/data/derived_data_long/ana/sondeos_E6_long_all.csv")))
+                     fread(here("analysis/data/derived_data_long/ana/sondeos_E9_long_all.csv")) %>% 
+                       .[, exp := "E9_long"],
+                     fread(here("analysis/data/derived_data_long/ana/sondeos_E6_long_all.csv")))
 
 sondeos_all %>% 
   ggplot(aes(lev/1000, value.est)) +
@@ -432,6 +432,7 @@ imerg <- purrr::map(q, function(f){
 files <- Sys.glob(here("analysis/data/derived_data_long/ana/area/E*_ana*_area_acum_*.rds"))
 
 pp_area <- purrr::map(files, readRDS) %>% rbindlist()
+
 pp_area %>% 
   # .[, exp := str_remove(exp, "_long")] %>% 
   .[umbral %in% c(1, 5, 10, 25)] %>% 
@@ -466,9 +467,15 @@ pp_area %>%
 ```
 
 
+
+
 (ref:fss-abi) FSS calculated over 1-hour accumulated precipitation for 1 mm (a and c) and 25 mm (b and d) thresholds, at 10 km (a and b) and 100 km (c and d) scales, for the first-guess of CTRL (orange line), POL (red line), and ABI (turquoise line) experiments between 00 UTC 8 November and 12 UTC 23 November.
 
 ```{r fss-abi, fig.cap="(ref:fss-abi)", fig.width=6, fig.height=5}
+fss_from_top_bottom <- function(top, bottom) {
+  ifelse(bottom > 0, 1 - top/bottom, 0)
+}
+
 files <- Sys.glob(here("analysis/data/derived_data_long/ana/fss_1h_ana*"))
 
 fss <- purrr::map(files, function(f) {
@@ -501,8 +508,8 @@ fss %>%
 
 (ref:fss-abi-all) FSS calculated over 1-hour accumulated precipitation for 1,5, 10, 25 and 50 mm thresholds as function of the radious of influence ($km$), for the first-guess of CTRL (orange line), POL (red line), and ABI (turquoise line) experiments between 00 UTC 8 November and 12 UTC 23 November.
 
-```{r fss-abi-all, fig.cap="(ref:fss-abi-all)", fig.width=6, fig.height=3}
-fss[, .(fss = 1 - sum(top)/sum(bottom)), by =.(window, q, exp)] %>% 
+```{r fss-abi-all, fig.cap="(ref:fss-abi-all)", fig.width=6, fig.height=6}
+fss[, .(fss = fss_from_top_bottom(sum(top), sum(bottom))), by =.(window, q, exp)] %>% 
   # .[q %in% c(1, 5, 10)] %>% 
   .[, ":="(q_label = factor(q, labels = c("1~mmh^{-1}", "5~mmh^{-1}", "10~mmh^{-1}", "25~mmh^{-1}", "50~mmh^{-1}")))] %>%
   ggplot(aes(window*10, fss)) +
@@ -520,6 +527,7 @@ fss[, .(fss = 1 - sum(top)/sum(bottom)), by =.(window, q, exp)] %>%
 ## Deterministic forecast
 
 ```{r fss-abi-fcst, fig.cap="(ref:fss-abi)", fig.width=6, fig.height=5}
+
 files <- Sys.glob(here("analysis/data/derived_data_long/fcst_det/fss/fss_1h_*"))
 
 fss <- purrr::map(files, function(f) {
@@ -534,7 +542,7 @@ fss <- purrr::map(files, function(f) {
 
 fss %>% 
   .[, lead_time := as.numeric(date - ini_date)/3600] %>% 
-  .[, .(fss = 1 - sum(top)/sum(bottom)), by =.(window, q, exp, lead_time)] %>% 
+  .[, .(fss = fss_from_top_bottom(sum(top), sum(bottom))), by =.(window, q, exp, lead_time)] %>% 
   
   .[q %in% c(1, 5, 25) & window %in% c(1, 11)] %>% 
   .[, ":="(q_label = factor(q, labels = c("1~mm~h^{-1}", "5~mm~h^{-1}", "25~mm~h^{-1}")),
@@ -552,11 +560,12 @@ fss %>%
   theme_minimal(base_size = 9) +
   theme(legend.position = "bottom",
         panel.background = element_rect(fill = "#fbfbfb", color = NA))
+
 ```
 
 
 ```{r}
-fss[, .(fss = 1 - sum(top)/sum(bottom)), by =.(window, q, exp)] %>% 
+fss[, .(fss = fss_from_top_bottom(sum(top), sum(bottom))), by =.(window, q, exp)] %>% 
   # .[q %in% c(1, 5, 10)] %>% 
   .[, ":="(q_label = factor(q, labels = c("1~mmh^{-1}", "5~mmh^{-1}", "10~mmh^{-1}", "25~mmh^{-1}", "50~mmh^{-1}")))] %>%
   ggplot(aes(window*10, fss)) +
@@ -570,3 +579,95 @@ fss[, .(fss = 1 - sum(top)/sum(bottom)), by =.(window, q, exp)] %>%
         legend.margin = margin())
 ```
 
+```{r}
+q = c(1, 5, 10, 25, 50)
+# lon_band = c(-67, -54.5)
+# lat_band = c(-38.5, -21)
+lon_band = c(-67.7, -53.7)
+lat_band = c(-40.5, -21.3)
+
+imerg <- Sys.glob("~/datosmunin3/DATA_EXP/IMERG/IMERG_201811*_long_d02.rds") %>% 
+  map(function(f) {
+    
+    meta <- unglue(basename(f), "IMERG_{ini}_1h_long_d02.rds")
+    
+    obs <- readr::read_rds(f) %>% 
+      setDT() %>%
+      # .[, ini_date := 1]
+      .[, ini_date := ymd_h(meta[[1]][["ini"]])] %>% 
+      .[, lead_time := as.numeric(end_date - ini_date)/3600] 
+    
+    purrr::map(q, function(f){
+      
+      obs %>%
+        .[, c("lon", "lat") := wrf_project(x, y, inverse = TRUE, round = FALSE)] %>% 
+        .[lon %between% lon_band & lat %between% lat_band] %>%
+        .[, .(area = sum(pp_acum > f)/.N), by = .(lead_time)] %>%
+        .[, umbral := f] %>%
+        .[]
+    }) %>%
+      rbindlist()
+    
+  }) %>% 
+  rbindlist() 
+
+
+
+# imerg <- purrr::map(q, function(f){
+#   
+#   imerg %>%
+#     .[, c("lon", "lat") := wrf_project(x, y, inverse = TRUE, round = FALSE)] %>% 
+#     .[lon %between% lon_band & lat %between% lat_band] %>%
+#     .[, .(area = sum(pp_acum > f)/.N), by = .(end_date)] %>%
+#     .[, umbral := f] %>%
+#     .[]
+# }) %>%
+#   rbindlist()
+
+
+files <- Sys.glob(here("analysis/data/derived_data_long/fcst_det/area/E*_fcst_det*_area_acum_*.rds"))
+
+pp_area <- purrr::map(files, function(f){
+  
+  meta <- unglue(basename(f), "{exp}_fcst_det_{ini_date}_area_acum_1h.rds")
+  
+  readRDS(f) %>%
+    setDT() %>% 
+    .[, ini_date := ymd_hms(meta[[1]][["ini_date"]])]
+}) %>% 
+  rbindlist() %>% 
+  .[, lead_time := as.numeric(date - ini_date)/3600] 
+
+
+
+pp_area %>% 
+  # .[, exp := str_remove(exp, "_long")] %>% 
+  .[umbral %in% c(1, 5, 10, 25)] %>% 
+  .[, .(mean_area = mean(area),
+        max_area = max(area),
+        min_area = min(area)), by = .(umbral, lead_time, exp)] %>% 
+  ggplot(aes(lead_time, mean_area)) +
+  geom_line(data = imerg[umbral %in% c(1, 5, 10, 25)] %>% .[, .(area = mean(area)), by = .(lead_time, umbral)],
+            aes(lead_time, area, color = "OBS"),
+            linetype = 2) +
+  geom_ribbon(aes(ymin = min_area, ymax = max_area, fill = exp), alpha = .1) +
+  geom_line(aes(color = exp)) +
+  scale_color_manual(values = c(OBS = "grey20", colores_exp),
+                     labels = c(E6_long = "CTRL", E9_long = "POL",
+                                EG3_long = "ABI", OBS = "OBS")) +
+  scale_fill_manual(values = c(OBS = "grey20", colores_exp),
+                    guide = NULL,
+                    labels = c(E6_long = "CTRL", E9_long = "POL",
+                               EG3_long = "ABI", OBS = "OBS")) +
+  scale_y_continuous(label = scales::percent_format()) +
+  # scale_x_datetime(date_labels = "%d", date_breaks = "1 day", expand = c(0, 0)) +
+  facet_wrap(~umbral, scales = "free_y", ncol = 2,
+             labeller = labeller(umbral = c("1" = "1 mm", "5" = "5 mm", 
+                                            "10" = "10 mm", "25" = "25 mm"))) +
+  tagger::tag_facets() +
+  labs(y = "Área cubierta por precipitación (%)", x = NULL, 
+       fill = NULL, color = NULL, linetype = NULL) +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "bottom",
+        panel.background = element_rect(fill = "#fbfbfb", color = NA))
+```
