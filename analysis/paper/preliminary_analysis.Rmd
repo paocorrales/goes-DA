@@ -671,3 +671,42 @@ pp_area %>%
   theme(legend.position = "bottom",
         panel.background = element_rect(fill = "#fbfbfb", color = NA))
 ```
+
+```{r}
+files <- Sys.glob(here("analysis/data/derived_data_long/fcst_det/conv/interp_conv*"))
+
+conv <- map_df(files, function(f) {
+  
+  meta <- unglue(basename(f), "interp_conv_{exp}_long_{ini_date}.rds")
+  
+  read_rds(f) %>% 
+    .[, ini_date := ymd_hms(meta[[1]][["ini_date"]])] %>%
+    .[, lead_time := as.double(as.POSIXct(date) - as.POSIXct(ini_date))/3600]
+}) %>% 
+  setDT() %>% 
+  .[usage.flag != -1] %>% 
+  .[, fcst := fifelse(var == "q", fcst*1000000, fcst)] %>% 
+  .[, obs := fifelse(var == "q", obs*1000, obs)] %>% 
+  .[, .(rmse = sd(fcst - obs, na.rm = TRUE),
+        bias = mean(fcst - obs, na.rm = TRUE)), by = .(exp, lead_time, var)] 
+
+hline <- data.frame(variable = factor("bias"),
+                    var = c("t", "q", "u", "v"),
+                    value =  0)
+conv %>% 
+  
+  melt(measure.vars = c("rmse", "bias")) %>% 
+  # .[exp == "EG3_long"] %>% 
+  ggplot(aes(lead_time, value)) +
+  geom_hline(data = hline, aes(yintercept = value), color = "darkgrey") +
+  geom_line(aes(color = exp)) +
+  scale_color_manual(values = colores_exp, labels = c(E9_long = "POL", EG3_long = "ABI", E6_long = "CTRL"))  +
+  facet_grid(variable ~ var, scales = "free_y", labeller = labeller(variable = c("rmse" = "RMSE", "bias" = "BIAS"))) +
+  labs(x = "Forecast hour",
+       y = "RMSE / BIAS",
+       color = NULL) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+```
+
