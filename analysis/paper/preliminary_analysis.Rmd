@@ -384,7 +384,7 @@ sondeos %>%
 
 (ref:sondeos-all) RMSE (solid line) and BIAS (dashed line) of dew point temperature ($K$), temperature ($K$), zonal wind ($m s^{-1}$) and meridional wind ($m s^{-1}$) calculated by comparing the analysis of each experiment with RELAMPAGO radiosondes during the experiment period. The orange line corresponds to CTRL, the red line to POL and ABI is represented by a turquoise line.
 
-```{r sondeos-all, fig.width=7, fig.height=8, fig.cap="(ref:sondeos-iop)"}
+```{r sondeos-all, fig.width=7, fig.height=8, fig.cap="(ref:sondeos-all)"}
 sondeos_all <- rbind(fread(here("analysis/data/derived_data_long/ana/sondeos_EG3_long_all.csv")),
                      fread(here("analysis/data/derived_data_long/ana/sondeos_E9_long_all.csv")) %>% 
                        .[, exp := "E9_long"],
@@ -401,7 +401,8 @@ sondeos_all %>%
   tagger::tag_facets(position = list(x = 0.05, y = 0.95)) +
   labs(y = "Bias/RMSE", x = "Height (Km)", color = NULL, linetype = NULL) +
   theme_minimal() +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom",
+         panel.background = element_rect(fill = "#fbfbfb", color = NA))
 ```
 
 
@@ -521,12 +522,15 @@ fss[, .(fss = fss_from_top_bottom(sum(top), sum(bottom))), by =.(window, q, exp)
   theme_minimal() +
   theme(legend.position = "bottom",
         legend.box = "vertical", 
-        legend.margin = margin())
+        legend.margin = margin(),
+         panel.background = element_rect(fill = "#fbfbfb", color = NA))
 ```
 
 ## Deterministic forecast
 
-```{r fss-abi-fcst, fig.cap="(ref:fss-abi)", fig.width=6, fig.height=5}
+(ref:fss-abi-fcst) FSS at each forecast hour calculated over 1-hour accumulated precipitation for 1 mm (a and d), 5 mm (b and e) and 25 mm (c and f) thresholds, at 10 km (a-c) and 100 km (d-f) scales, for all forecast inicialized from CTRL (orange line), POL (red line), and ABI (turquoise line).
+
+```{r fss-abi-fcst, fig.cap="(ref:fss-abi-fcst)", fig.width=6, fig.height=5}
 
 files <- Sys.glob(here("analysis/data/derived_data_long/fcst_det/fss/fss_1h_*"))
 
@@ -556,7 +560,7 @@ fss %>%
   # scale_x_datetime(date_labels = "%d", date_breaks = "1 day", expand = c(0, 0)) +
   facet_grid(w_label ~ q_label, labeller = label_parsed) +
   tagger::tag_facets(position = list(x = 0.05, y = 0.90)) +
-  labs(color = NULL, x = NULL, y = "FSS", linetype = NULL) +
+  labs(color = NULL, x = "Forecast hour", y = "FSS", linetype = NULL) +
   theme_minimal(base_size = 9) +
   theme(legend.position = "bottom",
         panel.background = element_rect(fill = "#fbfbfb", color = NA))
@@ -564,7 +568,9 @@ fss %>%
 ```
 
 
-```{r}
+(ref:fss-abi-all-fcst) FSS calculated over 1-hour accumulated precipitation for 1,5, 10, 25 and 50 mm thresholds as function of the radious of influence ($km$), for all experiments inicialized from CTRL (orange line), POL (red line), and ABI (turquoise line) experiments.
+
+```{r fss-abi-all-fcst, fig.cap="(ref:fss-abi-all-fcst)", fig.width=6, fig.height=6}
 fss[, .(fss = fss_from_top_bottom(sum(top), sum(bottom))), by =.(window, q, exp)] %>% 
   # .[q %in% c(1, 5, 10)] %>% 
   .[, ":="(q_label = factor(q, labels = c("1~mmh^{-1}", "5~mmh^{-1}", "10~mmh^{-1}", "25~mmh^{-1}", "50~mmh^{-1}")))] %>%
@@ -576,10 +582,13 @@ fss[, .(fss = fss_from_top_bottom(sum(top), sum(bottom))), by =.(window, q, exp)
   theme_minimal() +
   theme(legend.position = "bottom",
         legend.box = "vertical", 
-        legend.margin = margin())
+        legend.margin = margin(), 
+         panel.background = element_rect(fill = "#fbfbfb", color = NA))
 ```
 
-```{r}
+(ref:area-abi-fcst) Percentage of area covered by 1-hour precipitation greater than a) 1 $mmh^{-1}$, b) 5 $mmh^{-1}$, c) 10 $mmh^{-1}$, and d) 25 $mmh^{-1}$ aggregated over all forecasts inicialized from CTRL (orange line), POL (red line), and ABI (turquoise line) experiments. In shading and for each experiment the maximum and minimum area estimated by the ensemble is shown. In black dashed line the IMERG estimate is shown.
+
+```{r area-abi-fcst, fig.cap="(ref:area-abi-fcst)", fig.width=7, fig.height=5}
 q = c(1, 5, 10, 25, 50)
 # lon_band = c(-67, -54.5)
 # lat_band = c(-38.5, -21)
@@ -672,6 +681,9 @@ pp_area %>%
         panel.background = element_rect(fill = "#fbfbfb", color = NA))
 ```
 
+
+(ref:conv-fcst) RMSE (a-d) and BIAS (e-h) as function of forecast time calculated comparing the forecast with surface observations of specific humidity ($g/Kg$, a and d), temperature (K, b and f),zonal wind ($ms^{-1}$, c and g), and meridional wind ($ms^{-1}$, d and h).
+
 ```{r}
 files <- Sys.glob(here("analysis/data/derived_data_long/fcst_det/conv/interp_conv*"))
 
@@ -702,13 +714,64 @@ conv %>%
   geom_line(aes(color = exp)) +
   scale_color_manual(values = colores_exp, labels = c(E9_long = "POL", EG3_long = "ABI", E6_long = "CTRL"))  +
   facet_grid(variable ~ var, scales = "free_y", labeller = labeller(variable = c("rmse" = "RMSE", "bias" = "BIAS"))) +
-  labs(x = "Forecast hour",
+  tagger::tag_facets() +
+  labs(x = "Forecast time",
        y = "RMSE / BIAS",
        color = NULL) +
   theme_minimal() +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom",
+         panel.background = element_rect(fill = "#fbfbfb", color = NA))
 
 ```
+
+(ref:sondeos-all-fcst) RMSE (solid line) and BIAS (dashed line) of dew point temperature ($K$), temperature ($K$), zonal wind ($m s^{-1}$) and meridional wind ($m s^{-1}$) calculated by comparing the analysis of each experiment with RELAMPAGO radiosondes at 1, 6, 12 and 24 forecast hours. The orange line corresponds to CTRL, the red line to POL and ABI is represented by a turquoise line.
+
+```{r sondeos-all-fcst, fig.height=7, fig.width=6, fig.cap="(ref:sondeos-all-fcst)"}
+files <- Sys.glob("~/datosmunin3/EXP/derived_data/sondeos/sondeo_E*_long_fcst*")
+
+sondeos <- purrr::map(files, function(f){
+  
+  meta <- unglue(basename(f), "sondeo_{exp}_long_fcst_d02_{ini_date}.csv")
+  
+  fread(f) %>%
+    .[, value := fifelse(variable %in% c("t", "td"), value + 273.15, value)] %>%
+    .[, launch_time := as_datetime(launch_time)] %>% 
+    .[, fcst_time := as.double(as.POSIXct(nominal_launch_time) - as.POSIXct(ymd_hms(meta[[1]][["ini_date"]])))/3600] %>% 
+    .[fcst_time %in% c(1, 6, 12, 18, 24, 30)] %>% 
+    
+    .[variable %in% c("t", "td", "u", "v") & 
+        !is.na(fcst_value) & 
+        site != "Sao Borja, Brazil"] %>%
+    .[, lev := cut_round(alt, c(seq(0, 3000, 500), seq(4000, 21000, 1000)))] 
+
+}) %>%
+  rbindlist()
+
+sondeos %>% 
+    .[, .(RMSE = mean(sqrt((fcst_value - value)^2), na.rm = TRUE),
+        BIAS = mean(fcst_value - value, na.rm = TRUE)), by = .(exp, variable, lev, fcst_time)] %>%
+  melt(measure.vars = c("RMSE", "BIAS"), variable.name = "estadistico", value.name = "value.est") %>%
+  .[lev <= 12000 ] %>%
+  .[, ":="(variable_labels = factor(variable, labels = c("Temperature~(K)", "Dew~point~temperature~(K)",
+                                                         "U~wind~(ms^{-1})", "V~wind~(ms^{-1})")))] %>% 
+  .[fcst_time < 19] %>% 
+  ggplot(aes(lev/1000, value.est)) +
+  geom_hline(yintercept = 0, color = "grey30") +
+  geom_line(aes(color = exp, linetype = estadistico)) +
+  # scale_color_manual(values = c(colores_exp), labels = c(E10_long = "POL+ABI", EG3_long = "ABI")) +
+  scale_color_manual(values = c(colores_exp), labels = c(E9_long = "POL", EG3_long = "ABI", E6_long = "CTRL")) +
+  coord_flip() +
+  facet_grid(fcst_time ~ variable_labels, scales = "free_x", 
+             labeller = label_parsed) +
+  tagger::tag_facets(position = list(x = 0.05, y = 0.95)) +
+  labs(y = "Bias/RMSE", x = "Height (Km)", color = NULL, linetype = NULL) +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+         panel.background = element_rect(fill = "#fbfbfb", color = NA))
+
+
+```
+
 
 #### Comparison between long and case study experiment
 
