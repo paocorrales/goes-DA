@@ -60,6 +60,7 @@ scale_date <- function(ini = 20181120180000, end = 20181123120000,
 }
 
 colores_exp <- c(E6_long = "#EE7733", E9_long = "#CC3311", EG3_long = "#047994")
+colores_exp2 <- c(E6 = "#EE7733", E9 = "#CC3311", EG3 = "#047994")
 ```
 
 ## Analysis
@@ -360,6 +361,84 @@ perfiles %>%
 ```
 
 
+### Analisis menos guess
+
+* El impacto de POL no es homogeneo. Hay momentos donde AmG es muy alto y esto puede estar asociado a la asimilación de observaciones de satelites multiespectrales. Esto es particularmente notorio en la humedad y temperatura.
+* En todos los experimentos AmG es similar, es decir no hay un experimento donde esta diferencia va aumentando a medida que pasan los ciclos de asimilación.
+* El impacto en ABI en en algunos periodos (varias horas o dias) mayor a los otros experimentos, es decir, AmG es mayor. Esto es notorio principalmente para V y un poco para Q y U. Si contamos la cantidad de veces que el impacto de ABI es mayor que el impacto en los otros 2 experimentos, esto es así en el 60% de las veces si miramos V y 57%y 54% si miramos Q y U respectivamente.
+* No se ve que la magnitud del impacto de ABI aumente con el tiempo. Es en general mayor que en los otros experimentos y esto se nota más en momentos estables. 
+
+
+```{r}
+files <- Sys.glob(here("analysis/data/derived_data_long/*/perfiles_*_*"))
+
+ana <- purrr::map(files[1:3], function(f) {
+  meta <- unglue(basename(f), "perfiles_{run}_era5_{exp}_long.csv")
+  fread(f) %>% 
+    .[, exp := meta[[1]][["exp"]]] 
+  
+}) %>% 
+  rbindlist() %>% 
+  .[exp %in% c("E6", "E9", "EG3")] %>% 
+  .[, date := as_datetime(date)] 
+
+gue <- purrr::map(files[4:6], function(f) {
+  meta <- unglue(basename(f), "perfiles_{run}_era5_{exp}_long.csv")
+  fread(f) %>% 
+    .[, exp := meta[[1]][["exp"]]] 
+  
+}) %>% 
+  rbindlist() %>% 
+  .[exp %in% c("E6", "E9", "EG3")] %>% 
+  .[, date := as_datetime(date)] 
+
+
+iop <- 
+ data.table(ini = c(ymd_hms("20181110140000"),
+                   ymd_hms("20181111230000"),
+                   ymd_hms("20181117070000"),
+                   ymd_hms("20181121140000"),
+                   ymd_hms("20181122130000")),
+              end = c(ymd_hms("20181110230000"),
+                   ymd_hms("20181112070000"),
+                   ymd_hms("20181117150000"),
+                   ymd_hms("20181121220000"),
+                   ymd_hms("20181122210000")),
+              name = c("IOP04",
+                   "IOP05",
+                   "IOP06",
+                   "IOP07",
+                   "IOP08")) 
+
+ana[gue, on = .(date, lev, variable, exp)] %>% 
+  .[, .(diff = mean(abs(ana-guess), na.rm = TRUE)), by = .(variable, exp, date)] %>% 
+  .[variable %in% c("T", "QVAPOR", "U", "V")] %>% 
+  ggplot(aes(date, diff)) +
+  geom_vline(data = iop, aes(xintercept = ini)) +
+  geom_vline(data = iop, aes(xintercept = end)) +
+  geom_line(aes(color = exp), alpha = 0.8) +
+  scale_color_manual(values = c(colores_exp2), labels = c(E9 = "POL", EG3 = "ABI", E6 = "CTRL")) +
+  facet_wrap(~variable, ncol = 1, scales = "free_y") +
+  theme_minimal()
+```
+
+
+```{r}
+
+
+ana[gue, on = .(date, lev, variable, exp)] %>% 
+  .[, .(diff = mean(abs(ana-guess), na.rm = TRUE)), by = .(variable, exp)] %>% 
+  .[variable %in% c("T", "QVAPOR", "U", "V")] %>% 
+  dcast(date + variable ~ exp, value.var = "diff") %>% 
+  # .[, ":="(count_diff = fifelse(EG3 > E6 & EG3 > E9, 1, 0))] %>% 
+  .[, .(mean(diff)), by = .(variable)]
+    # .[, .(sum(count_diff)/.N), by = .(variable)]
+
+```
+
+
+
+
 (ref:sondeos-iop) RMSE (solid line) and BIAS (dashed line) of dew point temperature ($K$), temperature ($K$), zonal wind ($m s^{-1}$) and meridional wind ($m s^{-1}$) calculated by comparing the analysis of each experiment with RELAMPAGO radiosondes during the IOPs include in the experiment period. The orange line corresponds to CTRL, the red line to POL and ABI is represented by a turquoise line.
 
 ```{r sondeos-iop, fig.width=7, fig.height=8, fig.cap="(ref:sondeos-iop)"}
@@ -566,7 +645,58 @@ fss %>%
         panel.background = element_rect(fill = "#fbfbfb", color = NA))
 
 ```
+(ref:fss-abi-fcst-per) FSS at each forecast hour calculated over 1-hour accumulated precipitation for 1 mm (a and d), 5 mm (b and e) and 25 mm (c and f) thresholds, at 10 km (a-c) and 100 km (d-f) scales, for all forecast inicialized from CTRL (orange line), POL (red line), and ABI (turquoise line)., fig.width=6, fig.height=5
 
+```{r fss-abi-fcst-per, fig.cap="(ref:fss-abi-fcst-per)"}
+
+files <- Sys.glob(here("analysis/data/derived_data_long/fcst_det/fss/fss_percentiles_1h_*"))
+
+fss <- purrr::map(files, function(f) {
+  
+  meta <- unglue(basename(f), "fss_percentiles_1h_fcst_det_{ini_date}_{exp}_d02.csv")
+  
+  fread(f) %>% 
+    .[, date := as_datetime(date)] %>% 
+    .[, ini_date := ymd_h(meta[[1]][["ini_date"]])]
+}) %>% 
+  rbindlist()
+
+fss %>% 
+  .[, lead_time := as.numeric(date - ini_date)/3600] %>% 
+  .[, .(fss = fss_from_top_bottom(sum(top), sum(bottom))), by =.(window, percentil, exp, lead_time)] %>% 
+  
+  .[window %in% c(1, 11) & percentil %in% c(0.97, 0.99, 0.9975)] %>%
+  .[, ":="(w_label = factor(window, labels = c("10~km", "100~km")))] %>%
+  ggplot(aes(lead_time, fss)) +
+  # geom_hline(yintercept = 1, color = "darkgray") +
+  geom_line(aes(color = exp)) +
+  scale_color_manual(values = colores_exp, 
+                     labels = c(E6_long = "CTRL", E9_long = "POL",
+                                EG3_long = "ABI")) +
+  # scale_x_datetime(date_labels = "%d", date_breaks = "1 day", expand = c(0, 0)) +
+  facet_grid(w_label ~ percentil, labeller = label_parsed) +
+  # facet_grid(window ~ percentil) +
+  tagger::tag_facets(position = list(x = 0.05, y = 0.90)) +
+  labs(color = NULL, x = "Forecast hour", y = "FSS", linetype = NULL) +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "bottom",
+        panel.background = element_rect(fill = "#fbfbfb", color = NA))
+
+
+fss[, .(fss = fss_from_top_bottom(sum(top), sum(bottom))), by = .(window, percentil, exp)] %>% 
+  # .[q %in% c(1, 5, 10)] %>% 
+  # .[, ":="(q_label = factor(q, labels = c("1~mmh^{-1}", "5~mmh^{-1}", "10~mmh^{-1}", "25~mmh^{-1}", "50~mmh^{-1}")))] %>%
+  ggplot(aes(window*10, fss)) +
+  geom_line(aes(color = exp)) +
+  scale_color_manual(values = c(colores_exp), labels = c(E9_long = "POL", EG3_long = "ABI", E6_long = "CTRL")) +
+  facet_wrap(vars(percentil), scales = "free_y", labeller = label_parsed) +
+  labs(color = NULL, linetype = NULL, x = "Radius of Influence (km)", y = "FSS") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        legend.box = "vertical", 
+        legend.margin = margin(), 
+         panel.background = element_rect(fill = "#fbfbfb", color = NA))
+```
 
 (ref:fss-abi-all-fcst) FSS calculated over 1-hour accumulated precipitation for 1,5, 10, 25 and 50 mm thresholds as function of the radious of influence ($km$), for all experiments inicialized from CTRL (orange line), POL (red line), and ABI (turquoise line) experiments.
 
@@ -775,6 +905,230 @@ sondeos %>%
 
 #### Comparison between long and case study experiment
 
+##### Analysis
+
+```{r message=FALSE, warning=FALSE, fig.width=6, fig.height=8}
+
+perfiles %>% 
+  .[variable == "T" & date %between% ymd_hms(c(20181120180000, 20181123120000))] %>% 
+  ggplot(aes(date, lev)) +
+  geom_contour_fill(aes(z = ana  - era, fill = stat(level)), 
+                    breaks = seq(-3, 3, 0.5)) +
+  geom_contour2(aes(z = ana - era), color = "white", size = 0.05,
+                breaks = seq(-3, 3, 0.5)) +
+  scale_fill_divergent_discretised(guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3,
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black")) +
+  scale_y_level(name = "Pressure (hPa)", breaks = c(1000, 850, 750, 500, 300, 200, 100)) +
+  scale_date(ini = 20181121000000, end = 20181123110000, break_bin = "12 hours") +
+  facet_wrap(vars(exp), ncol = 3,  labeller = labeller(exp = c(E6 = "CTRL (SATWND)", E9 = "POL (RAD)", 
+                                                              E10 = "POL+ABI", EG3 = "ABI"))) +
+  labs(fill = "Temperature (K)",
+       x = NULL,
+       y = "Pressure (hPa)") +
+  tag_facets(position = list(x = 0.03, y = 0.97)) +
+  theme_minimal(base_size = 8) +
+  theme(legend.position = "bottom",
+        tagger.panel.tag.text = element_text(size = 8),
+        plot.margin = margin(0, 0, 0, 0, "cm"),
+        panel.ontop = TRUE,
+        panel.grid = element_line(linetype = 3)) +
+  
+  perfiles %>% 
+  .[variable == "QVAPOR" & date %between% ymd_hms(c(20181120180000, 20181123120000))] %>% 
+  ggplot(aes(date, lev)) +
+  geom_contour_fill(aes(z = ana  - era, fill = stat(level)),  
+                    breaks = seq(-0.0025, 0.0015, 0.0004)) +
+  geom_contour2(aes(z = ana  - era), color = "white", size = 0.05,
+                breaks = seq(-0.0025, 0.0015, 0.0004)) +
+  scale_fill_divergent_discretised(guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3,
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black")) +
+  scale_y_level(name = "Pressure (hPa)", breaks = c(1000, 850, 750, 500, 300, 200, 100)) +
+  scale_date(ini = 20181121000000, end = 20181123110000, break_bin = "12 hours") +
+  facet_wrap(vars(exp), ncol = 3,  labeller = labeller(exp = c(E6 = "CTRL (SATWND)", E9 = "POL (RAD)", 
+                                                              E10 = "POL+ABI", EG3 = "ABI"))) +
+  labs(fill = latex2exp::TeX("Specific \nhumidity ($g$ $Kg^{-1}$)"),
+       x = NULL,
+       y = "Pressure (hPa)") +
+  tag_facets(position = list(x = 0.03, y = 0.97), tag_pool = c("d", "e", "f")) +
+  theme_minimal(base_size = 8) +
+  theme(legend.position = "bottom",
+        tagger.panel.tag.text = element_text(size = 8),
+        plot.margin = margin(0, 0, 0, 0, "cm"),
+        panel.ontop = TRUE,
+        panel.grid = element_line(linetype = 3)) +
+  
+  perfiles %>% 
+  .[variable == "U" & date %between% ymd_hms(c(20181120180000, 20181123120000))] %>% 
+  ggplot(aes(date, lev)) +
+  geom_contour_fill(aes(z = ana  - era, fill = stat(level)), 
+                    breaks = seq(-4, 5, 0.5)) +
+  geom_contour2(aes(z = ana - era), color = "white", size = 0.05,
+                breaks = seq(-4, 5, 0.5)) +
+  scale_fill_divergent_discretised(guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3,
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black")) +
+  scale_y_level(name = "PrePressuresión (hPa)", breaks = c(1000, 850, 750, 500, 300, 200, 100)) +
+  scale_date(ini = 20181121000000, end = 20181123110000, break_bin = "12 hours") +
+  facet_wrap(vars(exp), ncol = 4,  labeller = labeller(exp = c(E6 = "CTRL (SATWND)", E9 = "POL (RAD)", 
+                                                              E10 = "POL+ABI", EG3 = "ABI"))) +
+  labs(fill = latex2exp::TeX("U ($m$ $s^{-1}$)"),
+       x = NULL,
+       y = "Pressure (hPa)") +
+  tag_facets(position = list(x = 0.03, y = 0.97), tag_pool = c("g", "h", "i")) +
+  theme_minimal(base_size = 8) +
+  theme(legend.position = "bottom",
+        tagger.panel.tag.text = element_text(size = 8),
+        plot.margin = margin(0, 0, 0, 0, "cm"),
+        panel.ontop = TRUE,
+        panel.grid = element_line(linetype = 3)) +
+  
+  perfiles %>% 
+  .[variable == "V" & date %between% ymd_hms(c(20181120180000, 20181123120000))] %>% 
+  ggplot(aes(date, lev)) +
+  geom_contour_fill(aes(z = ana  - era, fill = stat(level)), 
+                    breaks = seq(-4, 7, 1)) +
+  geom_contour2(aes(z = ana - era), color = "white", size = 0.05,
+                breaks = seq(-4, 7, 1)) +
+  scale_fill_divergent_discretised(guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3,
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black")) +
+  scale_y_level(name = "Pressure (hPa)", breaks = c(1000, 850, 750, 500, 300, 200, 100)) +
+  scale_date(ini = 20181121000000, end = 20181123110000, break_bin = "12 hours") +
+  facet_wrap(vars(exp), ncol = 3, 
+             labeller = labeller(exp = c(E6 = "CTRL (SATWND)", E9 = "POL (RAD)", 
+                                                              E10 = "POL+ABI", EG3 = "ABI"))) +
+  labs(fill = latex2exp::TeX("V ($m$ $s^{-1}$)"),
+       x = NULL,
+       y = "Pressure (hPa)") +
+  tag_facets(position = list(x = 0.03, y = 0.97), tag_pool = c("j", "k", "l")) +
+  theme_minimal(base_size = 8) +
+  theme(legend.position = "bottom",
+        tagger.panel.tag.text = element_text(size = 8),
+        plot.margin = margin(0, 0, 0, 0, "cm"),
+        panel.ontop = TRUE,
+        panel.grid = element_line(linetype = 3)) +
+  
+  plot_layout(ncol = 1, heights = c(1, 1, 1, 1)) 
+```
+
+
+```{r}
+fss_from_top_bottom <- function(top, bottom) {
+  ifelse(bottom > 0, 1 - top/bottom, 0)
+}
+
+files <- Sys.glob(here("analysis/data/derived_data_long/ana/fss_1h_ana*"))
+
+fss <- purrr::map(files, function(f) {
+  
+  meta <- unglue(basename(f), "fss_1h_ana_*_{exp}.csv")
+  
+  fread(f) %>% 
+    .[, date := as_datetime(date)] 
+}) %>% 
+  rbindlist() %>% 
+  separate(exp, into = c("exp", "run"))
+
+files <- Sys.glob("~/datosmunin3/EXP/derived_data/fss_1h_ana_2018112018*")
+
+fss_ana <- purrr::map(files, function(f) {
+  
+  meta <- unglue(basename(f), "fss_1h_ana_*_{exp}.csv")
+  
+  fread(f) %>% 
+    .[, date := as_datetime(date)] 
+}) %>% 
+  rbindlist() %>% 
+  .[, run := "case study"]
+
+rbind(fss, fss_ana) %>% 
+  .[q %in% c(1, 10) & window %in% c(1, 11) & 
+      date %between% ymd_hms(c(20181120180000, 20181123120000))] %>% 
+  .[, ":="(q_label = factor(q, labels = c("1~mm~h^{-1}", "10~mm~h^{-1}")),
+           w_label = factor(window, labels = c("10~km", "100~km")))] %>% 
+  ggplot(aes(date, fss)) +
+  geom_hline(yintercept = 1, color = "darkgray") +
+  geom_line(aes(color = exp, linetype = run)) +
+  scale_color_manual(values = c( E6 = "#EE7733", E9 = "#CC3311", EG3 = "#047994"), 
+                     labels = c(E6 = "CTRL", E9 = "POL",
+                                EG3 = "ABI")) +
+  scale_x_datetime(date_labels = "%d", date_breaks = "1 day", expand = c(0, 0)) +
+  facet_grid(w_label ~ q_label, labeller = label_parsed) +
+  tagger::tag_facets(position = list(x = 0.05, y = 0.90)) +
+  labs(color = NULL, x = NULL, y = "FSS", linetype = NULL) +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "bottom",
+        panel.background = element_rect(fill = "#fbfbfb", color = NA))
+```
+
+```{r}
+files <- Sys.glob("~/datosmunin3/EXP/derived_data/mucape/mcape_ana*20181122120000.nc")
+
+files <- files[str_detect(files, "E6|E9|EG3")]
+
+
+mcape <- map(files, function(f) {
+  
+  meta <- unglue(basename(f), "mcape_ana_{exp}_{date}.nc")
+  
+  ReadNetCDF(f) %>% 
+    .[, exp := meta[[1]][["exp"]]]
+  
+  
+}) %>% rbindlist() %>% 
+  separate(exp, into = c("exp", "run")) %>% 
+  .[, run := fifelse(is.na(run), "case study", run)] %>% 
+  .[,c("x", "y") := wrf_project(XLONG, XLAT, inverse = FALSE) ]
+
+
+mcape %>% 
+  .[mcape_mcin_lcl_lfc == "mcape"] %>% 
+  ggplot(aes(x, y)) +
+  geom_contour_fill(aes(z = cape_2d, fill = ..level..), proj = norargentina_lambert) +
+  scale_fill_brewer(palette = "YlOrRd", direction = 1, 
+                    guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3,
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black")) +
+  geom_mapa() +
+  facet_grid(exp ~ run, labeller = labeller(exp = c(E6 = "CTRL", E9 = "POL",
+                                EG3 = "ABI"))) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+
+
+mcape %>% 
+  .[mcape_mcin_lcl_lfc == "mcape"] %>% 
+  dcast(x + y + exp ~ run, value.var = "cape_2d") %>% 
+  .[, diff := `case study` - long] %>% 
+    ggplot(aes(x, y)) +
+  geom_contour_fill(aes(z = diff, fill = ..level..), proj = norargentina_lambert) +
+  scale_fill_divergent_discretised( guide = guide_colorsteps(barwidth = 25,
+                                                            barheight = 0.3,
+                                                            title.position = "left", 
+                                                            title.vjust = 1,
+                                                            frame.colour = "black")) +
+  geom_mapa() +
+  facet_grid(exp ~ ., labeller = labeller(exp = c(E6 = "CTRL", E9 = "POL",
+                                EG3 = "ABI"))) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+
+##### Forecast
+
 ```{r}
 imerg <- read_rds("~/tesis_doctorado/data/derived_data/observations/IMERG_1h.rds")
 
@@ -794,14 +1148,14 @@ imerg <- purrr::map(q, function(f){
 }) %>%
   rbindlist()
 
-files <- Sys.glob("~/tesis_doctorado/data/derived_data/analysis_variables/pp_area/*_fcst_det*area*")
+files <- Sys.glob("~/goes.rad.exp/R/*_fcst_det*area*")
 
 pp_area <- purrr::map(files, function(f) {
   
   meta <- unglue(f, "{exp}_fcst_det_{ini}_area_acum_1h.rds")
   
   readRDS(f) %>% 
-    .[, ini_date := ymd_h(meta[[1]][["ini"]])]
+    .[, ini_date := ymd_hms(meta[[1]][["ini"]])]
   
 }) %>% rbindlist() %>% 
   .[, run := "case study"]
@@ -821,7 +1175,7 @@ pp_area2 <- purrr::map(files, function(f){
   # .[, run := "long"] %>% 
   separate(col = exp, into = c("exp", "run"), sep = "_")
 
-rbind(pp_area[ini_date == ymd_h("2018112200")], pp_area2) %>% 
+rbind(pp_area, pp_area2) %>% 
   .[umbral %in% c(1, 5, 10) & exp %in% c("E6", "E9", "EG3", "E6_long", "E9_long", "EG3_long")] %>% 
   # .[ini_date == ymd_h("2018112200")] %>% 
   .[, .(mean_area = mean(area)), by = .(umbral, date, exp, run)] %>% 
@@ -849,6 +1203,99 @@ rbind(pp_area[ini_date == ymd_h("2018112200")], pp_area2) %>%
 ```
 
 ```{r}
+sal_long <- map(Sys.glob(here("analysis/data/derived_data_long/fcst_det/sal*long*")), fread) %>%
+  rbindlist() 
+
+sal_long %>% 
+melt(measure.vars = c("s", "a", "l")) %>% 
+  # .[ini_date == ymd_hms(20181122120000)] %>%
+  ggplot(aes(value)) +
+  # geom_density(aes(color = exp)) +
+  geom_boxplot(aes(color = exp)) +
+  scale_color_manual(values = colores_exp,
+                     labels = c(E6_long = "CTRL", E9_long = "POL",
+                                EG3_long = "ABI")) +
+  facet_wrap(~variable, ncol = 1, scales = "free") +
+  theme_minimal()
+```
+
+
+```{r}
+files <- Sys.glob(here("analysis/data/derived_data_long/fcst_det/fss/fss_fcst_det_tb*"))
+
+fss <- purrr::map(files, fread) %>% 
+  rbindlist() %>% 
+  # .[, q := rep(c(-30, -60, -70, -78, -84, -85), 5920)] %>% 
+  .[, lead_time := as.numeric(date - ini_date)/3600] %>% 
+  .[]
+  
+  .[, .(fss = fss_from_top_bottom(sum(top), sum(bottom))), by =.(window, q, exp, lead_time)]
+
+fss %>% 
+  .[ini_date == ymd_hms(20181122120000)] %>% 
+  .[, .(fss = fss_from_top_bottom(sum(top), sum(bottom))), by =.(window, q, exp, date)] %>% 
+  .[q %in% c(30, 60) & window %in% c(1, 11)] %>%
+  # .[, ":="(q_label = factor(q, labels = c("1~mm~h^{-1}", "5~mm~h^{-1}", "25~mm~h^{-1}")),
+  #          w_label = factor(window, labels = c("10~km", "100~km")))] %>% 
+  ggplot(aes(date, fss)) +
+  # geom_hline(yintercept = 1, color = "darkgray") +
+  geom_line(aes(color = exp)) +
+  scale_color_manual(values = colores_exp, 
+                     labels = c(E6_long = "CTRL", E9_long = "POL",
+                                EG3_long = "ABI")) +
+  # scale_x_datetime(date_labels = "%d", date_breaks = "1 day", expand = c(0, 0)) +
+  # facet_grid(w_label ~ q_label, labeller = label_parsed) +
+  facet_grid(window~q) +
+  tagger::tag_facets(position = list(x = 0.05, y = 0.90)) +
+  labs(color = NULL, x = NULL, y = "FSS", linetype = NULL) +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "bottom",
+        panel.background = element_rect(fill = "#fbfbfb", color = NA))
+
+fss %>% 
+  .[, .(fss = fss_from_top_bottom(sum(top), sum(bottom))), by =.(window, q, exp, lead_time)] %>% 
+  .[q %in% c(30, 60) & window %in% c(1, 11)] %>%
+  # .[, ":="(q_label = factor(q, labels = c("1~mm~h^{-1}", "5~mm~h^{-1}", "25~mm~h^{-1}")),
+  #          w_label = factor(window, labels = c("10~km", "100~km")))] %>% 
+  ggplot(aes(lead_time, fss)) +
+  # geom_hline(yintercept = 1, color = "darkgray") +
+  geom_line(aes(color = exp)) +
+  scale_color_manual(values = colores_exp, 
+                     labels = c(E6_long = "CTRL", E9_long = "POL",
+                                EG3_long = "ABI")) +
+  # scale_x_datetime(date_labels = "%d", date_breaks = "1 day", expand = c(0, 0)) +
+  # facet_grid(w_label ~ q_label, labeller = label_parsed) +
+  facet_grid(window~q) +
+  tagger::tag_facets(position = list(x = 0.05, y = 0.90)) +
+  labs(color = NULL, x = "Lead time", y = "FSS", linetype = NULL) +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "bottom",
+        panel.background = element_rect(fill = "#fbfbfb", color = NA))
+
+
+fss %>% 
+  .[, .(fss = fss_from_top_bottom(sum(top), sum(bottom))), by =.(window, q, exp)] %>% 
+  .[q %in% c(30, 60, 70, 78)] %>%
+  # .[, ":="(q_label = factor(q, labels = c("1~mm~h^{-1}", "5~mm~h^{-1}", "25~mm~h^{-1}")),
+  #          w_label = factor(window, labels = c("10~km", "100~km")))] %>% 
+  ggplot(aes(window, fss)) +
+  # geom_hline(yintercept = 1, color = "darkgray") +
+  geom_line(aes(color = exp)) +
+  scale_color_manual(values = colores_exp, 
+                     labels = c(E6_long = "CTRL", E9_long = "POL",
+                                EG3_long = "ABI")) +
+  # scale_x_datetime(date_labels = "%d", date_breaks = "1 day", expand = c(0, 0)) +
+  # facet_grid(w_label ~ q_label, labeller = label_parsed) +
+  facet_wrap(~q, scales = "free") +
+  tagger::tag_facets(position = list(x = 0.05, y = 0.90)) +
+  labs(color = NULL, x = "Lead time", y = "FSS", linetype = NULL) +
+  theme_minimal(base_size = 9) +
+  theme(legend.position = "bottom",
+        panel.background = element_rect(fill = "#fbfbfb", color = NA))
+```
+
+
+```{r}
 files <- Sys.glob(here("analysis/data/derived_data_long/fcst_det/fss/fss_1h_fcst_det_2018112212*"))
 
 fss <- purrr::map(files, function(f) {
@@ -864,7 +1311,7 @@ fss <- purrr::map(files, function(f) {
   .[, .(exp, run, date, window, q, fss, ini_date)]
 
 
-files <- Sys.glob("~/datosmunin3/EXP/derived_data/fss_1h_fcst_det_2018112200*d02.csv")
+files <- Sys.glob("~/goes.rad.exp/R/fss_1h_fcst_det_2018112212*d02.csv")
 
 
 fss_det <- map(files, function(f){
@@ -875,15 +1322,17 @@ fss_det <- map(files, function(f){
     .[, ini_date := ymd_h(meta[[1]][["ini_date"]])]
 }) %>% 
   rbindlist() %>% 
-  .[, run := "case study"] %>% 
-  setnames("w", "window")
+  .[, ":="(run = "case study",
+           bottom = NULL,
+           top = NULL)]
+  # setnames("w", "window")
 
 rbind(fss, fss_det) %>% 
   # .[, lead_time := as.numeric(date - ini_date)/3600] %>% 
   # .[, .(fss = fss_from_top_bottom(sum(top), sum(bottom))), by =.(window, q, exp, lead_time)] %>% 
   
-  .[q %in% c(1, 5) & window %in% c(1, 11) & exp %in% c("E6", "E9", "EG3")] %>% 
-  .[, ":="(q_label = factor(q, labels = c("1~mm~h^{-1}", "5~mm~h^{-1}")),
+  .[q %in% c(1, 5, 25) & window %in% c(1, 11) & exp %in% c("E6", "E9", "EG3")] %>% 
+  .[, ":="(q_label = factor(q, labels = c("1~mm~h^{-1}", "5~mm~h^{-1}", "25~mm~h^{-1}")),
            w_label = factor(window, labels = c("10~km", "100~km")))] %>% 
   ggplot(aes(date, fss)) +
   # geom_hline(yintercept = 1, color = "darkgray") +
@@ -899,5 +1348,45 @@ rbind(fss, fss_det) %>%
   theme(legend.position = "bottom",
         panel.background = element_rect(fill = "#fbfbfb", color = NA))
 
+```
+
+```{r}
+sal_short <- map(Sys.glob("~/goes.rad.exp/R/sal*"), fread) %>%
+  rbindlist() %>% 
+  .[, run := "case study"]
+
+sal_long <- map(Sys.glob("~/sal*long*"), fread) %>%
+  rbindlist() %>% 
+  .[ini_date == ymd_hms(20181122120000)] %>% 
+  separate(exp, into = c("exp", "run"), sep = "_")
+
+rbind(sal_short, sal_long) %>% 
+  .[exp == "E6"] %>%
+  .[, l_cut := cut(l, breaks = seq(0, 2, 0.25))] %>%
+  ggplot(aes(s, a)) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  # geom_hline(data = sal_stat[exp == "E6_long"], aes(yintercept = median_a), linetype = 2) +
+  # geom_vline(data = sal_stat[exp == "E6_long"], aes(xintercept = median_s), linetype = 2) +
+  geom_point(aes(color = l_cut, shape = run), size = 3) +
+  scale_color_viridis_d(direction = -1, guide = guide_colorsteps(show.limits = TRUE)) +
+  scale_shape_manual(values = c("x", "o")) +
+  coord_equal(ylim =  c(-2, 2), xlim = c(-2, 2)) +
+  labs(x = "S - Structure",
+       y = "A - Amplitude",
+       color = "L - Location") +
+  theme_minimal()
+
+colores <- c("E6" = "#EE7733", "E9" = "#CC3311", "EG3" = "#047994")
+
+rbind(sal_short, sal_long) %>% 
+  melt(measure.vars = c("s", "a", "l")) %>% 
+  ggplot(aes(value)) +
+  geom_density(aes(color = exp, linetype = run)) +
+  scale_color_manual(values = colores,
+                     labels = c(E6 = "CTRL", E9 = "POL",
+                                EG3 = "ABI")) +
+  facet_wrap(~variable, ncol = 1, scales = "free") +
+  theme_minimal()
 ```
 
